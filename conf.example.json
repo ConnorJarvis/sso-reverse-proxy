@@ -1,0 +1,16 @@
+{
+	"OAuthClientID": "",
+	"OAuthClientSecret": "",
+	"OAuthRedirect":"http://auth.example.com/callback",
+	"Domain": "example.com",
+	"AuthDomain": "auth.example.com",
+	"AuthPort": 80,
+	"AuthIP": "0.0.0.0",
+	"SecretValue": "sladhfkasdjhflkajsdhf",
+	"Backends" :[
+		{
+			"Domain":"test.example.com","Backend":"http://127.0.0.1:82"
+		}
+	],
+	"Whitelist": ["email@example.com"]
+}
