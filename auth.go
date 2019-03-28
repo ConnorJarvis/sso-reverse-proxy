@@ -15,13 +15,13 @@ import (
 )
 
 type Auth struct {
-	OAuthClientID     string
-	OAuthClientSecret string
-	OAuthRedirect     string
-	SecretValue       []byte
-	Domain            string
-	Whitelist         map[string]bool
-	WhitelistMutex    *sync.RWMutex
+	OAuthClientID       string
+	OAuthClientSecret   string
+	OAuthRedirect       string
+	SecretValue         []byte
+	Domain              string
+	EmailWhitelist      map[string]bool
+	EmailWhitelistMutex *sync.RWMutex
 }
 
 type UserInfo struct {
@@ -37,15 +37,15 @@ type UserInfo struct {
 }
 
 func NewAuth(OAuthClientID, OAuthClientSecret, OAuthRedirect string, SecretValue []byte, Domain string) Auth {
-	return Auth{OAuthClientID: OAuthClientID, OAuthClientSecret: OAuthClientSecret, OAuthRedirect: OAuthRedirect, SecretValue: SecretValue, Domain: Domain, Whitelist: make(map[string]bool), WhitelistMutex: new(sync.RWMutex)}
+	return Auth{OAuthClientID: OAuthClientID, OAuthClientSecret: OAuthClientSecret, OAuthRedirect: OAuthRedirect, SecretValue: SecretValue, Domain: Domain, EmailWhitelist: make(map[string]bool), EmailWhitelistMutex: new(sync.RWMutex)}
 }
 
-func (a *Auth) ParseWhitelist(Whitelist []string) error {
-	a.WhitelistMutex.Lock()
-	for i := 0; i < len(Whitelist); i++ {
-		a.Whitelist[Whitelist[i]] = true
+func (a *Auth) ParseWhitelist(EmailWhitelist []string) error {
+	a.EmailWhitelistMutex.Lock()
+	for i := 0; i < len(EmailWhitelist); i++ {
+		a.EmailWhitelist[EmailWhitelist[i]] = true
 	}
-	a.WhitelistMutex.Unlock()
+	a.EmailWhitelistMutex.Unlock()
 	return nil
 }
 
@@ -79,7 +79,6 @@ func (a *Auth) ProcessCallback(res http.ResponseWriter, req *http.Request) error
 		return err
 	}
 	if stateCookie.Value != req.URL.Query().Get("state") {
-		res.Write([]byte("Mismatching state"))
 		return errors.New("Mismatching state")
 	}
 	tok, err := conf.Exchange(oauth2.NoContext, req.URL.Query().Get("code"))
@@ -108,12 +107,12 @@ func (a *Auth) ProcessCallback(res http.ResponseWriter, req *http.Request) error
 }
 
 func (a *Auth) SetupJWT(res http.ResponseWriter, req *http.Request, email string) error {
-	a.WhitelistMutex.RLock()
-	if a.Whitelist[email] != true {
-		a.WhitelistMutex.RUnlock()
+	a.EmailWhitelistMutex.RLock()
+	if a.EmailWhitelist[email] != true {
+		a.EmailWhitelistMutex.RUnlock()
 		return errors.New("Email is not whitelisted")
 	}
-	a.WhitelistMutex.RUnlock()
+	a.EmailWhitelistMutex.RUnlock()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"email": email,
 		"nbf":   time.Now().Unix(),
@@ -123,14 +122,14 @@ func (a *Auth) SetupJWT(res http.ResponseWriter, req *http.Request, email string
 	if err != nil {
 		fmt.Println(err)
 	}
-	http.SetCookie(res, &http.Cookie{"SSO-Token", tokenString, "/", a.Domain, time.Now().Add(time.Hour), time.Now().Add(time.Hour).Format(time.UnixDate), 3600, false, false, 0, "SSO-Token=" + tokenString, []string{"SSO-Token=" + tokenString}})
+	http.SetCookie(res, &http.Cookie{"SSO-Token", tokenString, "/", a.Domain, time.Now().Add(time.Hour), time.Now().Add(time.Hour).Format(time.UnixDate), 3600, false, false, 2, "SSO-Token=" + tokenString, []string{"SSO-Token=" + tokenString}})
 	return nil
 }
 
-func (a *Auth) ValidateJWT(res http.ResponseWriter, req *http.Request) error {
+func (a *Auth) ValidateJWT(res http.ResponseWriter, req *http.Request, backend ParsedBackend) error {
 	SSOToken, err := req.Cookie("SSO-Token")
 	if err != nil {
-		return errors.New("Cookier Error")
+		return errors.New("Cookie Error")
 	}
 	token, err := jwt.Parse(SSOToken.Value, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -138,8 +137,22 @@ func (a *Auth) ValidateJWT(res http.ResponseWriter, req *http.Request) error {
 		}
 		return a.SecretValue, nil
 	})
-	if _, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		email := claims["email"].(string)
+		backend.EmailWhitelistMutex.RLock()
+		if len(backend.EmailWhitelist) == 0 {
+			a.EmailWhitelistMutex.RLock()
+			if a.EmailWhitelist[email] != true {
+				a.EmailWhitelistMutex.RUnlock()
+				backend.EmailWhitelistMutex.RUnlock()
+				return errors.New("Email is not whitelisted")
+			}
+		} else {
+			if backend.EmailWhitelist[email] != true {
+				backend.EmailWhitelistMutex.RUnlock()
+				return errors.New("Email is not whitelisted")
+			}
+		}
 		return nil
 	} else {
 		return errors.New("Token Error")

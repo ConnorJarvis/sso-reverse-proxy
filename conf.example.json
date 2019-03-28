@@ -9,8 +9,11 @@
 	"SecretValue": "sladhfkasdjhflkajsdhf",
 	"Backends" :[
 		{
-			"Domain":"test.example.com","Backend":"http://127.0.0.1:82"
+			"Domain":"test.example.com","Backend":"http://127.0.0.1:82","EmailWhitelist":[],"AddressWhitelist":["0.0.0.0/0"]
 		}
 	],
-	"Whitelist": ["email@example.com"]
+	"EmailWhitelist": ["test@example.com"],
+	"AddressWhitelist":[],
+	"TrustedAddresses": [],
+	"RealIPHeader": "X-Real-IP"
 }

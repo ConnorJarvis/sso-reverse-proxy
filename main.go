@@ -16,7 +16,10 @@ type Configuration struct {
 	AuthIP            string
 	SecretValue       string
 	Backends          []Backend
-	Whitelist         []string
+	EmailWhitelist    []string
+	AddressWhitelist  []string
+	TrustedAddresses  []string
+	RealIPHeader      string
 }
 
 var config *Configuration
@@ -31,9 +34,11 @@ func init() {
 func main() {
 	go basicBackend()
 	auth := NewAuth(config.OAuthClientID, config.OAuthClientSecret, config.OAuthRedirect, []byte(config.SecretValue), config.Domain)
-	auth.ParseWhitelist(config.Whitelist)
-	proxy := NewProxy(config.Domain, config.AuthDomain, config.AuthPort, config.AuthIP, config.SecretValue, auth)
+	auth.ParseWhitelist(config.EmailWhitelist)
+	proxy := NewProxy(config.Domain, config.AuthDomain, config.AuthPort, config.AuthIP, config.SecretValue, auth, config.RealIPHeader)
 	proxy.ParseBackends(config.Backends)
+	proxy.ParseTrustedAddresses(config.TrustedAddresses)
+	proxy.ParseAddressWhitelist(config.AddressWhitelist)
 	proxy.StartProxy()
 
 }
