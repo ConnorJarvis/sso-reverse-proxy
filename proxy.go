@@ -93,7 +93,7 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 
 	if req.Host == config.AuthDomain && req.URL.RequestURI() != "/favicon.ico" {
 		if req.URL.Query().Get("return_url") != "" {
-			http.SetCookie(res, &http.Cookie{"return_url", req.URL.Query().Get("return_url"), "/", p.AuthDomain, time.Now().Add(time.Minute * 5), time.Now().Add(time.Minute * 5).Format(time.UnixDate), 300, false, false, 2, "return_url=" + req.URL.Query().Get("return_url"), []string{"return_url=" + req.URL.Query().Get("return_url")}})
+			http.SetCookie(res, &http.Cookie{"return_url", req.URL.Query().Get("return_url"), "/", p.AuthDomain, time.Now().Add(time.Minute * 5), time.Now().Add(time.Minute * 5).Format(time.UnixDate), 300, true, false, 2, "return_url=" + req.URL.Query().Get("return_url"), []string{"return_url=" + req.URL.Query().Get("return_url")}})
 		}
 		if req.URL.Path == "/callback" {
 			err := p.Auth.ProcessCallback(res, req)
@@ -106,7 +106,7 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 				if err != nil {
 					fmt.Println(err)
 				}
-				http.Redirect(res, req, "http://"+returnURLString, 307)
+				http.Redirect(res, req, "https://"+returnURLString, 307)
 				return
 			}
 		} else {
@@ -114,7 +114,7 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				fmt.Println(err)
 			}
-			http.SetCookie(res, &http.Cookie{"state", state.String(), "/", p.AuthDomain, time.Now().Add(time.Minute * 5), time.Now().Add(time.Minute * 5).Format(time.UnixDate), 300, false, false, 2, "state=" + state.String(), []string{"state=" + state.String()}})
+			http.SetCookie(res, &http.Cookie{"state", state.String(), "/", p.AuthDomain, time.Now().Add(time.Minute * 5), time.Now().Add(time.Minute * 5).Format(time.UnixDate), 300, true, false, 2, "state=" + state.String(), []string{"state=" + state.String()}})
 
 			url := p.Auth.GenerateURL(state.String())
 			http.Redirect(res, req, url, 307)
@@ -123,13 +123,13 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 	} else if backend != nil {
 		err := p.Auth.ValidateJWT(res, req, *backend)
 		if err != nil {
-			http.Redirect(res, req, "http://"+p.AuthDomain+"/?return_url="+url.QueryEscape(requestedURL), 307)
+			http.Redirect(res, req, "https://"+p.AuthDomain+"/?return_url="+url.QueryEscape(requestedURL), 307)
 			return
 		}
 
 		host, _, err := net.SplitHostPort(req.RemoteAddr)
 		if err != nil {
-			http.Redirect(res, req, "http://"+p.AuthDomain+"/?return_url="+url.QueryEscape(requestedURL), 307)
+			http.Redirect(res, req, "https://"+p.AuthDomain+"/?return_url="+url.QueryEscape(requestedURL), 307)
 			return
 		}
 
@@ -141,10 +141,10 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 
 		if !p.CheckIP(host, backend.Domain) {
 			fmt.Println("Bad IP")
-			http.Redirect(res, req, "http://"+p.AuthDomain+"/?return_url="+url.QueryEscape(requestedURL), 307)
+			http.Redirect(res, req, "https://"+p.AuthDomain+"/?return_url="+url.QueryEscape(requestedURL), 307)
 			return
 		}
-		p.serveReverseProxy(backend.Backend+req.URL.RequestURI(), res, req)
+		p.serveReverseProxy(backend.Backend, res, req)
 
 	}
 
@@ -155,11 +155,6 @@ func (p *Proxy) serveReverseProxy(target string, res http.ResponseWriter, req *h
 	url, _ := url.Parse(target)
 
 	proxy := httputil.NewSingleHostReverseProxy(url)
-
-	req.URL.Host = url.Host
-	req.URL.Scheme = url.Scheme
-	req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
-	req.Host = url.Host
 
 	proxy.ServeHTTP(res, req)
 }

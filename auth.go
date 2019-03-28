@@ -122,7 +122,8 @@ func (a *Auth) SetupJWT(res http.ResponseWriter, req *http.Request, email string
 	if err != nil {
 		fmt.Println(err)
 	}
-	http.SetCookie(res, &http.Cookie{"SSO-Token", tokenString, "/", a.Domain, time.Now().Add(time.Hour), time.Now().Add(time.Hour).Format(time.UnixDate), 3600, false, false, 2, "SSO-Token=" + tokenString, []string{"SSO-Token=" + tokenString}})
+	cookie := &http.Cookie{Name: "SSO-Token", Value: tokenString, Path: "/", Domain: a.Domain, Expires: time.Now().Add(time.Hour), Secure: true, SameSite: 2}
+	http.SetCookie(res, cookie)
 	return nil
 }
 
