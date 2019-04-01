@@ -33,6 +33,7 @@ type ParsedBackend struct {
 	EmailWhitelist      map[string]bool
 	AddressWhitelist    []string
 	EmailWhitelistMutex *sync.RWMutex
+	Passthrough         bool
 }
 
 type Backend struct {
@@ -40,6 +41,7 @@ type Backend struct {
 	Backend          string
 	EmailWhitelist   []string
 	AddressWhitelist []string
+	Passthrough      bool
 }
 
 func NewProxy(Domain, AuthDomain string, AuthPort int, AuthIP, SecretValue string, Auth Auth, RealIPHeader string) Proxy {
@@ -70,7 +72,7 @@ func (p *Proxy) ParseBackends(Backends []Backend) error {
 			whitelist[Backends[i].EmailWhitelist[a]] = true
 
 		}
-		parsedBackend := &ParsedBackend{Domain: Backends[i].Domain, Backend: Backends[i].Backend, EmailWhitelist: whitelist, AddressWhitelist: Backends[i].AddressWhitelist, EmailWhitelistMutex: new(sync.RWMutex)}
+		parsedBackend := &ParsedBackend{Domain: Backends[i].Domain, Backend: Backends[i].Backend, EmailWhitelist: whitelist, AddressWhitelist: Backends[i].AddressWhitelist, EmailWhitelistMutex: new(sync.RWMutex), Passthrough: Backends[i].Passthrough}
 		p.Backends[Backends[i].Domain] = parsedBackend
 	}
 	p.BackendsMutex.Unlock()
@@ -90,7 +92,6 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 	p.BackendsMutex.RLock()
 	backend := p.Backends[req.Host]
 	p.BackendsMutex.RUnlock()
-
 	if req.Host == config.AuthDomain && req.URL.RequestURI() != "/favicon.ico" {
 		if req.URL.Query().Get("return_url") != "" {
 			http.SetCookie(res, &http.Cookie{"return_url", req.URL.Query().Get("return_url"), "/", p.AuthDomain, time.Now().Add(time.Minute * 5), time.Now().Add(time.Minute * 5).Format(time.UnixDate), 300, true, false, 2, "return_url=" + req.URL.Query().Get("return_url"), []string{"return_url=" + req.URL.Query().Get("return_url")}})
@@ -114,12 +115,13 @@ func (p *Proxy) handleRequest(res http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				fmt.Println(err)
 			}
-			http.SetCookie(res, &http.Cookie{"state", state.String(), "/", p.AuthDomain, time.Now().Add(time.Minute * 5), time.Now().Add(time.Minute * 5).Format(time.UnixDate), 300, true, false, 2, "state=" + state.String(), []string{"state=" + state.String()}})
-
+			p.Auth.CreateStateJWT(res, req, state.String())
 			url := p.Auth.GenerateURL(state.String())
 			http.Redirect(res, req, url, 307)
 		}
 
+	} else if backend.Passthrough == true {
+		p.serveReverseProxy(backend.Backend, res, req)
 	} else if backend != nil {
 		err := p.Auth.ValidateJWT(res, req, *backend)
 		if err != nil {

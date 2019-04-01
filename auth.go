@@ -20,6 +20,7 @@ type Auth struct {
 	OAuthRedirect       string
 	SecretValue         []byte
 	Domain              string
+	AuthDomain          string
 	EmailWhitelist      map[string]bool
 	EmailWhitelistMutex *sync.RWMutex
 }
@@ -36,8 +37,8 @@ type UserInfo struct {
 	Gender        string `json:"gender"`
 }
 
-func NewAuth(OAuthClientID, OAuthClientSecret, OAuthRedirect string, SecretValue []byte, Domain string) Auth {
-	return Auth{OAuthClientID: OAuthClientID, OAuthClientSecret: OAuthClientSecret, OAuthRedirect: OAuthRedirect, SecretValue: SecretValue, Domain: Domain, EmailWhitelist: make(map[string]bool), EmailWhitelistMutex: new(sync.RWMutex)}
+func NewAuth(OAuthClientID, OAuthClientSecret, OAuthRedirect string, SecretValue []byte, Domain, AuthDomain string) Auth {
+	return Auth{OAuthClientID: OAuthClientID, OAuthClientSecret: OAuthClientSecret, OAuthRedirect: OAuthRedirect, SecretValue: SecretValue, Domain: Domain, AuthDomain: AuthDomain, EmailWhitelist: make(map[string]bool), EmailWhitelistMutex: new(sync.RWMutex)}
 }
 
 func (a *Auth) ParseWhitelist(EmailWhitelist []string) error {
@@ -74,11 +75,11 @@ func (a *Auth) ProcessCallback(res http.ResponseWriter, req *http.Request) error
 		},
 		Endpoint: google.Endpoint,
 	}
-	stateCookie, err := req.Cookie("state")
+	state, err := a.ValidateState(res, req)
 	if err != nil {
 		return err
 	}
-	if stateCookie.Value != req.URL.Query().Get("state") {
+	if state != req.URL.Query().Get("state") {
 		return errors.New("Mismatching state")
 	}
 	tok, err := conf.Exchange(oauth2.NoContext, req.URL.Query().Get("code"))
@@ -106,6 +107,22 @@ func (a *Auth) ProcessCallback(res http.ResponseWriter, req *http.Request) error
 	return nil
 }
 
+func (a *Auth) CreateStateJWT(res http.ResponseWriter, req *http.Request, state string) error {
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"state": state,
+		"nbf":   time.Now().Unix(),
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	})
+	tokenString, err := token.SignedString(a.SecretValue)
+	if err != nil {
+		return err
+	}
+	cookie := &http.Cookie{Name: "State", Value: tokenString, Path: "/", Domain: a.AuthDomain, Expires: time.Now().Add(time.Hour), Secure: true, SameSite: 2}
+	http.SetCookie(res, cookie)
+	return nil
+}
+
 func (a *Auth) SetupJWT(res http.ResponseWriter, req *http.Request, email string) error {
 	a.EmailWhitelistMutex.RLock()
 	if a.EmailWhitelist[email] != true {
@@ -125,6 +142,26 @@ func (a *Auth) SetupJWT(res http.ResponseWriter, req *http.Request, email string
 	cookie := &http.Cookie{Name: "SSO-Token", Value: tokenString, Path: "/", Domain: a.Domain, Expires: time.Now().Add(time.Hour), Secure: true, SameSite: 2}
 	http.SetCookie(res, cookie)
 	return nil
+}
+
+func (a *Auth) ValidateState(res http.ResponseWriter, req *http.Request) (string, error) {
+	SSOToken, err := req.Cookie("State")
+	if err != nil {
+		return "", errors.New("Cookie Error")
+	}
+	token, err := jwt.Parse(SSOToken.Value, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+		return a.SecretValue, nil
+	})
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		state := claims["state"].(string)
+
+		return state, nil
+	} else {
+		return "", errors.New("Token Error")
+	}
 }
 
 func (a *Auth) ValidateJWT(res http.ResponseWriter, req *http.Request, backend ParsedBackend) error {
@@ -153,6 +190,11 @@ func (a *Auth) ValidateJWT(res http.ResponseWriter, req *http.Request, backend P
 				backend.EmailWhitelistMutex.RUnlock()
 				return errors.New("Email is not whitelisted")
 			}
+		}
+		expiry := claims["exp"].(float64)
+		fmt.Println(int64(expiry) - time.Now().Unix())
+		if int64(expiry)-time.Now().Unix() < 300 {
+			a.SetupJWT(res, req, email)
 		}
 		return nil
 	} else {

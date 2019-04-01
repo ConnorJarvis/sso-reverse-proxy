@@ -33,7 +33,7 @@ func init() {
 
 func main() {
 	go basicBackend()
-	auth := NewAuth(config.OAuthClientID, config.OAuthClientSecret, config.OAuthRedirect, []byte(config.SecretValue), config.Domain)
+	auth := NewAuth(config.OAuthClientID, config.OAuthClientSecret, config.OAuthRedirect, []byte(config.SecretValue), config.Domain, config.AuthDomain)
 	auth.ParseWhitelist(config.EmailWhitelist)
 	proxy := NewProxy(config.Domain, config.AuthDomain, config.AuthPort, config.AuthIP, config.SecretValue, auth, config.RealIPHeader)
 	proxy.ParseBackends(config.Backends)
